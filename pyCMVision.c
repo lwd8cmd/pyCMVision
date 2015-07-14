@@ -5,6 +5,7 @@
 
 #include <Python.h>
 
+#include <sys/ioctl.h>
 #include <fcntl.h>
 #include <linux/videodev2.h>
 #include <sys/mman.h>
@@ -104,8 +105,8 @@ typedef struct {
 	int width, height, bpp;
 	unsigned char started;
 
-	int v4l2_settings_n;
-	v4l2_settings_t v4l2_settings[256];
+	int ctrls_n;
+	struct v4l2_queryctrl ctrls[256];
 	
 	run rle[MAX_RUNS];
 	region regions[MAX_REG];
@@ -291,12 +292,57 @@ static int Camera_queue_all_buffers(Camera *self) {
 	return 0;
 }
 
+static int Camera_init_ctrls(Camera *self) {
+	struct v4l2_queryctrl queryctrl;
+	memset(&queryctrl, 0, sizeof(queryctrl));
+	queryctrl.id = V4L2_CTRL_CLASS_USER | V4L2_CTRL_FLAG_NEXT_CTRL;
+	while (0 == ioctl(self->fd, VIDIOC_QUERYCTRL, &queryctrl)) {
+		if (queryctrl.flags & V4L2_CTRL_FLAG_DISABLED)
+			continue;
+
+		self->ctrls[self->ctrls_n++] = queryctrl;
+
+		queryctrl.id |= V4L2_CTRL_FLAG_NEXT_CTRL;
+	}
+	if (errno != EINVAL) {
+		return -1;
+	}
+
+	return 0;
+}
+
+static PyObject *Camera_start(Camera *self) {
+	ASSERT_OPEN;
+	enum v4l2_buf_type type;
+	type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+
+	if(my_ioctl(self->fd, VIDIOC_STREAMON, &type)) {
+		return NULL;
+	}
+	self->started = 1;
+
+	Py_RETURN_NONE;
+}
+
+static PyObject *Camera_stop(Camera *self) {
+	ASSERT_OPEN;
+	enum v4l2_buf_type type;
+	type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+
+	if(my_ioctl(self->fd, VIDIOC_STREAMOFF, &type)) {
+		return NULL;
+	}
+
+	Py_RETURN_NONE;
+}
+
 static int Camera_init(Camera *self, PyObject *args, PyObject *kwargs) {
 	static char *kwlist [] = {
 		"path",
 		"w",
 		"h",
 		"fps",
+		"start",
 		NULL
 	};
 	const char *device_path;
@@ -304,8 +350,9 @@ static int Camera_init(Camera *self, PyObject *args, PyObject *kwargs) {
 	int w = 640;
 	int h = 480;
 	int fps = 30;
+	int start = 1;
 
-	if(!PyArg_ParseTupleAndKeywords(args, kwargs, "|siii", kwlist, &device_path, &w, &h, &fps)) {
+	if(!PyArg_ParseTupleAndKeywords(args, kwargs, "|siiii", kwlist, &device_path, &w, &h, &fps, &start)) {
 		return -1;
 	}
 
@@ -346,41 +393,32 @@ static int Camera_init(Camera *self, PyObject *args, PyObject *kwargs) {
 	Camera_set_fps(self, fps);
 	Camera_create_buffers(self, 3);
 	Camera_queue_all_buffers(self);
+	Camera_init_ctrls(self);
 
-	//load v4l2 settings parameters. Check does camera supports these?
-	v4l2_settings_t settings[] = {
-		{"exposure_auto", V4L2_CID_EXPOSURE_AUTO},
-		{"exposure_absolute", V4L2_CID_EXPOSURE_ABSOLUTE},
-		{"white_balance_automatic", V4L2_CID_AUTO_WHITE_BALANCE},
-		{"red_balance", V4L2_CID_RED_BALANCE},
-		{"green_balance", V4L2_CID_GAMMA},
-		// V4L2 dont have green balance settings
-		// only useful with PS3 Eye camera and modified ov534 driver
-		// https://github.com/lwd8cmd/Mitupead/blob/master/drivers/ov534.c
-		{"blue_balance", V4L2_CID_BLUE_BALANCE},
-		{"gain_automatic", V4L2_CID_AUTOGAIN},
-		{"brightness", V4L2_CID_BRIGHTNESS},
-		{"contrast", V4L2_CID_CONTRAST},
-		{"saturation", V4L2_CID_SATURATION},
-		{"hue", V4L2_CID_HUE},
-		{"gain", V4L2_CID_GAIN},
-		{"sharpness", V4L2_CID_SHARPNESS},
-		{"vertical_flip", V4L2_CID_VFLIP},
-		{"horizontal_flip", V4L2_CID_HFLIP},
-		{"white_balance_temperature", V4L2_CID_WHITE_BALANCE_TEMPERATURE},
-		// Definition overlapping green_balance
-		{"gamma", V4L2_CID_GAMMA},
-		{"power_line_frequency", V4L2_CID_POWER_LINE_FREQUENCY},
-		{"backlight_compensation", V4L2_CID_BACKLIGHT_COMPENSATION},
-		{"pan_absolute", V4L2_CID_PAN_ABSOLUTE},
-		{"tilt_absolute", V4L2_CID_TILT_ABSOLUTE},
-	};
-	self->v4l2_settings_n = ARRAY_SIZE(settings);
-	for (i=0; i<self->v4l2_settings_n; i++) {
-		self->v4l2_settings[i] = settings[i];
+	if (start) {
+		Camera_start(self);
 	}
 
 	return 0;
+}
+
+static char* name2var(unsigned char *name) {
+	int add_underscore = 0;
+	int i = 0;
+
+	static char s[128];
+
+	while (*name) {
+		if (isalnum(*name)) {
+			if (add_underscore) s[i++] = '_';
+			add_underscore = 0;
+			s[i++] = tolower(*name);
+		}
+		else if (ARRAY_SIZE(s)) add_underscore = 1;
+		name++;
+	}
+	s[i] = '\0';
+	return s;
 }
 
 static int Camera_get_V4L2_CID(Camera *self, int id) {
@@ -393,7 +431,7 @@ static int Camera_get_V4L2_CID(Camera *self, int id) {
 	return ctrl.value;
 }
 
-static PyObject *Camera_get_params(Camera *self, PyObject *args) {
+static PyObject *Camera_get_ctrl(Camera *self, PyObject *args) {
 	char *param;
 	if (!PyArg_ParseTuple(args, "s", &param)) {
 		return NULL;
@@ -401,9 +439,9 @@ static PyObject *Camera_get_params(Camera *self, PyObject *args) {
 
 	int i;
 	int retval = -1;
-	for (i=0; i<self->v4l2_settings_n; i++) {
-		if (strcmp(param, self->v4l2_settings[i].keyword) == 0) {
-			retval = Camera_get_V4L2_CID(self, self->v4l2_settings[i].id);
+	for (i=0; i<self->ctrls_n; i++) {
+		if (strcmp(param, name2var(self->ctrls[i].name)) == 0) {
+			retval = Camera_get_V4L2_CID(self, self->ctrls[i].id);
 			break;
 		}
 	}
@@ -419,68 +457,36 @@ static void Camera_set_V4L2_CID(Camera *self, int id, int value) {
 	my_ioctl(self->fd, VIDIOC_S_CTRL, &ctrl);
 }
 
-static PyObject *Camera_set_params(Camera *self, PyObject *args, PyObject *keywds) {
-	int maxprms = self->v4l2_settings_n;
-	int n = maxprms;
-	char *kwlist[n+1];
-	int ids[n];
-	int vs[n];
-	char format[n+1];
-
-	kwlist[n] = NULL;
-	format[0] = '|';
-
-	while (n--) {
-		kwlist[n] = self->v4l2_settings[n].keyword;
-		ids[n] = self->v4l2_settings[n].id;
-		vs[n] = -1;
-		format[n+1] = 'i';
-	}
-	
-	if (!PyArg_ParseTupleAndKeywords(args, keywds, format, kwlist,
-		&vs[0], &vs[1], &vs[2], &vs[3], &vs[4], &vs[5], &vs[6],
-		&vs[7], &vs[8], &vs[9], &vs[10], &vs[11], &vs[12], &vs[13], &vs[14])) {
+static PyObject *Camera_set_ctrl(Camera *self, PyObject *args) {
+	char *param;
+	int val;
+	if (!PyArg_ParseTuple(args, "si", &param, &val)) {
 		return NULL;
 	}
 
-	n = maxprms;
-	while (n--) {
-		if (vs[n] > -1) {
-			Camera_set_V4L2_CID(self, ids[n], vs[n]);
+	int i;
+	for (i=0; i<self->ctrls_n; i++) {
+		if (strcmp(param, name2var(self->ctrls[i].name)) == 0) {
+			Camera_set_V4L2_CID(self, self->ctrls[i].id, val);
+			break;
 		}
 	}
 
 	Py_RETURN_NONE;
 }
 
+static PyObject *Camera_query_ctrls(Camera *self, PyObject *args) {
+	PyObject *glst = PyList_New(self->ctrls_n);
+	int i;
+	for (i = 0; i < self->ctrls_n; i++) {
+		PyList_SET_ITEM(glst, i, Py_BuildValue("{sisssisisisisi}", "id", self->ctrls[i].id, "name", name2var(self->ctrls[i].name), "min", self->ctrls[i].minimum, "max", self->ctrls[i].maximum, "step", self->ctrls[i].step, "default", self->ctrls[i].default_value, "value", Camera_get_V4L2_CID(self, self->ctrls[i].id)));
+	}
+	return glst;
+}
+
 static PyObject *CameraShape(Camera *self) {
 	//return tuple (height, width)
 	return Py_BuildValue("(ii)", self->height, self->width);
-}
-
-static PyObject *Camera_start(Camera *self) {
-	ASSERT_OPEN;
-	enum v4l2_buf_type type;
-	type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-
-	if(my_ioctl(self->fd, VIDIOC_STREAMON, &type)) {
-		return NULL;
-	}
-	self->started = 1;
-
-	Py_RETURN_NONE;
-}
-
-static PyObject *Camera_stop(Camera *self) {
-	ASSERT_OPEN;
-	enum v4l2_buf_type type;
-	type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-
-	if(my_ioctl(self->fd, VIDIOC_STREAMOFF, &type)) {
-		return NULL;
-	}
-
-	Py_RETURN_NONE;
 }
 
 static PyObject *CameraOpened(Camera *self) {
@@ -518,7 +524,12 @@ static struct v4l2_buffer Camera_fill_buffer(Camera *self) {
 	return buffer;
 }
 
-static PyObject *Camera_read_internal(Camera *self, int queue) {
+static PyObject *Camera_read(Camera *self, PyObject *args) {
+	char *format = "yuv";
+	if (!PyArg_ParseTuple(args, "|s", &format)) {
+		return NULL;
+	}
+
 	struct v4l2_buffer buffer = Camera_fill_buffer(self);
 	if (buffer.index == -1) {
 		return NULL;
@@ -529,32 +540,63 @@ static PyObject *Camera_read_internal(Camera *self, int queue) {
 	int xy;
 	unsigned char* f = (unsigned char*)self->buffers[buffer.index].start;
 
-	for (xy = 0; xy < w*h; xy+=2) {
-		int y1, y2, u, v;
-		y1 = f[2*xy];
-		u = f[2*xy+1];
-		y2 = f[2*xy+2];
-		v = f[2*xy+3];
-		self->img[3*xy] = y1;
-		self->img[3*xy+1] = u;
-		self->img[3*xy+2] = v;
-	self->img[3*xy+3] = y2;
-	self->img[3*xy+4] = u;
-	self->img[3*xy+5] = v;
+	typedef enum {PX_RGB, PX_BGR, PX_YUV} pxformat_enum;
+	pxformat_enum pxformat;
+	if (strcmp(format, "rgb") == 0) {
+		pxformat = PX_RGB;
+	} else if (strcmp(format, "bgr") == 0) {
+		pxformat = PX_BGR;
+	} else {
+		pxformat = PX_YUV;
+	}
+
+	if (pxformat == PX_RGB || pxformat == PX_BGR) {
+		int rb = 1;
+		if (pxformat == PX_BGR) {
+			rb = -1;
+		}
+		#define CLAMP(c) ((c) <= 0 ? 0 : (c) >= 65025 ? 255 : (c) >> 8)
+		for (xy = 0; xy < w*h; xy+=2) {
+			int u = f[2*xy+1] - 128;
+			int v = f[2*xy+3] - 128;
+			int uv = 100 * u + 208 * v;
+			u *= 516;
+			v *= 409;
+
+			int y = 298 * (f[2*xy] - 16);
+			self->img[3*xy+1-rb] = CLAMP(y + v);
+			self->img[3*xy+1] = CLAMP(y - uv);
+			self->img[3*xy+1+rb] = CLAMP(y + u);
+
+			y = 298 * (f[2*xy+2] - 16);
+			self->img[3*xy+4-rb] = CLAMP(y + v);
+			self->img[3*xy+4] = CLAMP(y - uv);
+			self->img[3*xy+4+rb] = CLAMP(y + u);
+		}
+		#undef CLAMP
+	} else {
+		for (xy = 0; xy < w*h; xy+=2) {
+			int y1 = f[2*xy];
+			int u = f[2*xy+1];
+			int y2 = f[2*xy+2];
+			int v = f[2*xy+3];
+			self->img[3*xy] = y1;
+			self->img[3*xy+1] = u;
+			self->img[3*xy+2] = v;
+			self->img[3*xy+3] = y2;
+			self->img[3*xy+4] = u;
+			self->img[3*xy+5] = v;
+		}
 	}
 
 
-	if(queue && my_ioctl(self->fd, VIDIOC_QBUF, &buffer)) {
+	if(my_ioctl(self->fd, VIDIOC_QBUF, &buffer)) {
 		return NULL;
 	}
 
 	npy_intp dims[3] = {self->height, self->width, 3};
 	PyArrayObject *outArray = (PyArrayObject *) PyArray_SimpleNewFromData(3, dims, NPY_UINT8, self->img);
 	return PyArray_Return(outArray);
-}
-
-static PyObject *Camera_read(Camera *self) {
-	return Camera_read_internal(self, 1);
 }
 
 static PyObject *CameraSetColorMinArea(Camera *self, PyObject *args) {
@@ -1007,13 +1049,20 @@ static PyObject *CameraGetBlobs(Camera *self, PyObject *args) {
 	return PyArray_Return(outArray);
 }
 
+static PyObject *CameraTest(Camera *self) {
+	Py_RETURN_NONE;
+}
+
 static PyMethodDef Camera_methods[] = {
-	{"set", (PyCFunction)Camera_set_params, METH_VARARGS|METH_KEYWORDS,
-		"set_params(key=value, ...)\n\n"
+	{"set", (PyCFunction)Camera_set_ctrl, METH_VARARGS,
+		"set_params(str param, int value)\n\n"
 		"Set V4L2 settings"},
-	{"get", (PyCFunction)Camera_get_params, METH_VARARGS,
-		"get_params(string) -> int\n\n"
+	{"get", (PyCFunction)Camera_get_ctrl, METH_VARARGS,
+		"get_params(str param) -> int\n\n"
 		"Get V4L2 param value"},
+	{"settings", (PyCFunction)Camera_query_ctrls, METH_NOARGS,
+		"settings() -> {str name, int value, int default, int min, int max, int step}\n\n"
+		"Get all V4L2 params"},
 	{"start", (PyCFunction)Camera_start, METH_NOARGS,
 		"start()\n\n"
 		"Start video capture."},
@@ -1021,17 +1070,17 @@ static PyMethodDef Camera_methods[] = {
 		"stop()\n\n"
 		"Stop video capture."},
 	{"opened", (PyCFunction)CameraOpened, METH_NOARGS,
-		"opened()\n\n"
+		"opened() -> bool\n\n"
 		"True if camera is opened."},
 	{"started", (PyCFunction)CameraStarted, METH_NOARGS,
-		"started()\n\n"
+		"started() -> bool\n\n"
 		"True if camera is started."},
-	{"image", (PyCFunction)Camera_read, METH_NOARGS,
-		"image()\n\n"
+	{"image", (PyCFunction)Camera_read, METH_VARARGS,
+		"image(str |yuv|rgb|bgr) -> nparr [height, width, 3]\n\n"
 		"Capture image."},
 	{"shape", (PyCFunction)CameraShape, METH_NOARGS,
-		"shape()\n\n"
-		"Retrieve image dimensions (height, width)."},
+		"shape() -> (height, width)\n\n"
+		"Retrieve image dimensions."},
 	{"setColorMinArea", (PyCFunction)CameraSetColorMinArea, METH_VARARGS,
 		"setColorMinArea(int color_id, int min_area)\n\n"
 		"Find only blobs larger than min_area"},
@@ -1053,6 +1102,9 @@ static PyMethodDef Camera_methods[] = {
 	{"getBlobs", (PyCFunction)CameraGetBlobs, METH_VARARGS,
 		"getBlobs(int color_id)\n\n"
 		"Return connected components with color_id."},
+	{"test", (PyCFunction)CameraTest, METH_NOARGS,
+		"test()\n\n"
+		"For debugging C code."},
 	{NULL}
 };
 
