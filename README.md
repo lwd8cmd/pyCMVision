@@ -106,7 +106,7 @@ print(cam.image("rgb"))
 Retrieve image dimensions
 
 ```python
-print(cam.shaoe())
+print(cam.shape())
 >>> (480, 640)
 ```
 
