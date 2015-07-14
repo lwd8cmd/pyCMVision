@@ -34,6 +34,21 @@ if len(blobs) > 0:
 
 # API
 
+- pyCMVision.Camera(path="/dev/video0", w=640, h=480, fps=30, start=1)
+Open camera. Arguments are optional:
+*path* is video stream location,
+*w* camera width,
+*h* camera height,
+*fps* framerate,
+*start*=1 means camera is started automatically.´
+When using start=0 cam.start() must be called manually before capturing images.
+
+```python
+import pyCMVision
+
+cam = pyCMVision.Camera()
+```
+
 - settings() -> {str name, int value, int default, int min, int max, int step}
 
 Return all available camera settings.
