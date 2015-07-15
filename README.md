@@ -136,7 +136,8 @@ import pyCMVision
 
 cam = pyCMVision.Camera()
 colors = np.zeros((256,256,256), dtype=np.uint8)
-colors[0:128,:,:] = 1#colors with v (in YUV colorspace) have index 1, everything else have index 0.
+#colors with v (in YUV colorspace) have index 1, everything else have index 0.
+colors[0:128,:,:] = 1
 cam.setColors(colors)
 ```
 
@@ -152,7 +153,8 @@ cam = pyCMVision.Camera()
 h, w = cam.shape()
 ys, xs = np.mgrid[:h,:w]
 active_pixels = np.ones((h, w), dtype=np.uint8)
-active_pixels[(ys-240)**2+(xs-320)**2 > 100**2] = 0#pixels which are outside the circle r=100 (x=320, y=240) are inactive
+#pixels which are outside the circle r=100 (x=320, y=240) are inactive
+active_pixels[(ys-240)**2+(xs-320)**2 > 100**2] = 0
 cam.setPixels(active_pixels)
 ```
 
@@ -187,7 +189,8 @@ import pyCMVision
 cam = pyCMVision.Camera()
 
 colors = np.zeros((256,256,256), dtype=np.uint8)
-colors[0:128,:,:] = 1#colors with v (in YUV colorspace) have index 1, everything else have index 0.
+#colors with v (in YUV colorspace) have index 1, everything else have index 0.
+colors[0:128,:,:] = 1
 cam.setColors(colors)
 
 segmented_buffer = cam.getBuffer()
@@ -209,7 +212,8 @@ import pyCMVision
 cam = pyCMVision.Camera()
 
 colors = np.zeros((256,256,256), dtype=np.uint8)
-colors[0:128,:,:] = 1#colors with v (in YUV colorspace) have index 1, everything else have index 0.
+# colors with v (in YUV colorspace) have index 1, everything else have index 0.
+colors[0:128,:,:] = 1
 cam.setColors(colors)
 
 cam.analyse()
