@@ -24,7 +24,7 @@ colors = np.zeros((256,256,256), dtype=np.uint8)
 colors[0:128,0:128,20:256] = 1#set colors v=0..128, u=0..128, y=128..255 index to 1
 cam.setColors(colors)
 
-cam.setColorMinArea(1, 10)#find blobs having color 1 with min area 30
+cam.setColorMinArea(1, 10)#find blobs having color 1 with min area 10
 
 cam.analyse()
 
