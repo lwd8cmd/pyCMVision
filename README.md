@@ -54,6 +54,10 @@ cam = pyCMVision.Camera()
 
 Return all available camera settings.
 ```python
+import pyCMVision
+
+cam = pyCMVision.Camera()
+
 print(cam.settings())
 >>>[[name:"brightness", value: 30, default: 30, min: 0, max: 255, step: 1], ...]
 ```
@@ -62,6 +66,8 @@ print(cam.settings())
 
 Change camera settings.
 ```python
+import pyCMVision
+cam = pyCMVision.Camera()
 cam.set("brightness", 50)
 ```
 
@@ -70,6 +76,8 @@ cam.set("brightness", 50)
 Get camera setting.
 
 ```python
+import pyCMVision
+cam = pyCMVision.Camera()
 print(cam.get("brightness"))
 >>> 50
 ```
@@ -95,6 +103,8 @@ Returns true if video capture is started.
 Takes image and returns pixel array. Available formats are yuv (default), rgb, bgr.
 
 ```python
+import pyCMVision
+cam = pyCMVision.Camera()
 print(cam.image())
 >>> [[255,,0],[y,u,v],...]
 print(cam.image("rgb"))
@@ -106,6 +116,9 @@ print(cam.image("rgb"))
 Retrieve image dimensions
 
 ```python
+import pyCMVision
+
+cam = pyCMVision.Camera()
 print(cam.shape())
 >>> (480, 640)
 ```
@@ -119,6 +132,9 @@ Maps every color to color_id.
 
 ```python
 import numpy as np
+import pyCMVision
+
+cam = pyCMVision.Camera()
 colors = np.zeros((256,256,256), dtype=np.uint8)
 colors[0:128,:,:] = 1#colors with v (in YUV colorspace) have index 1, everything else have index 0.
 cam.setColors(colors)
@@ -130,6 +146,9 @@ Set active pixels. Must have the same shape as image. 1=pixel is active and is u
 
 ```python
 import numpy as np
+import pyCMVision
+
+cam = pyCMVision.Camera()
 h, w = cam.shape()
 ys, xs = np.mgrid[:h,:w]
 active_pixels = np.ones((h, w), dtype=np.uint8)
@@ -143,6 +162,9 @@ Maps each pixel coordinate to polar coordinate (r, phi).
 
 ```python
 import numpy as np
+import pyCMVision
+
+cam = pyCMVision.Camera()
 h, w = cam.shape()
 ys, xs = np.mgrid[:h,:w]
 distances = (h-ys)*2
@@ -160,6 +182,9 @@ Returns segmented image buffer (each pixel color is already mapped to color_id).
 
 ```python
 import numpy as np
+import pyCMVision
+
+cam = pyCMVision.Camera()
 
 colors = np.zeros((256,256,256), dtype=np.uint8)
 colors[0:128,:,:] = 1#colors with v (in YUV colorspace) have index 1, everything else have index 0.
@@ -179,6 +204,9 @@ Returns all blolbs having the same color.
 
 ```python
 import numpy as np
+import pyCMVision
+
+cam = pyCMVision.Camera()
 
 colors = np.zeros((256,256,256), dtype=np.uint8)
 colors[0:128,:,:] = 1#colors with v (in YUV colorspace) have index 1, everything else have index 0.
